@@ -19,7 +19,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 # ── SET THE URL HERE ───────────────────────────────────────────────────────────
 
-PLACE_URL = "https://www.google.com/maps/place/Dog+Park+Pregassona+-+Rug%C3%AC/@46.0078413,8.9306054,14.05z/data=!4m10!1m3!11m2!2s7H_mnpNDSxntS3tEFxBggg!3e3!3m5!1s0x4784339c38d13279:0xc77c23ea9290bcb0!8m2!3d46.0260386!4d8.966781!16s%2Fg%2F11fk572r6z?entry=ttu&g_ep=EgoyMDI2MDQxNS4wIKXMDSoASAFQAw%3D%3D"
+PLACE_URL = "https://www.google.com/maps/place/Parco+Tassino/@46.0010446,8.9428326,17z/data=!3m1!4b1!4m6!3m5!1s0x47842d39ce2ab675:0x53487855d2037c35!8m2!3d46.0010446!4d8.9454075!16s%2Fg%2F11f6g21hjz?entry=ttu&g_ep=EgoyMDI2MDQxNS4wIKXMDSoASAFQAw%3D%3D"
 
 TARGET_REVIEWS = 10_000
 OUTPUT_DIR = Path("lugano_output")
@@ -63,15 +63,37 @@ def open_url(page, url: str):
     human_delay(1.0, 2.0)
 
 def click_reviews_tab(page):
-    for text in ["Reviews", "Recensioni", "Anmeldelser"]:
+    # Try role=tab first (some layouts), then aria-label buttons, then text links
+    candidates = ["Reviews", "Recensioni", "Anmeldelser", "Avis", "Bewertungen"]
+    for text in candidates:
         try:
             tab = page.get_by_role("tab", name=text)
-            if tab.is_visible(timeout=4000):
+            if tab.is_visible(timeout=3000):
                 tab.click()
-                human_delay(1.5, 2.5)
+                human_delay(2.0, 3.0)
                 return True
         except PlaywrightTimeout:
             continue
+    # Fallback: button with aria-label containing "reviews" (case-insensitive)
+    try:
+        btn = page.locator('button[aria-label*="review" i], button[aria-label*="recensi" i]').first
+        if btn.is_visible(timeout=3000):
+            btn.click()
+            human_delay(2.0, 3.0)
+            return True
+    except Exception:
+        pass
+    # Last resort: click any element whose text matches
+    for text in candidates:
+        try:
+            el = page.get_by_text(text, exact=True).first
+            if el.is_visible(timeout=2000):
+                el.click()
+                human_delay(2.0, 3.0)
+                return True
+        except Exception:
+            continue
+    print("   ⚠️  Could not find reviews tab — will try scraping anyway")
     return False
 
 def sort_by_newest(page):
@@ -126,11 +148,13 @@ def scroll_to_target(page, target: int):
         last_count = current
         expand_reviews(page)
 
-        # Walk up from the last review to find its scrollable container, then scroll it
+        # Walk up from the LAST review to find its scrollable container, then scroll it
         try:
             page.evaluate("""
-                const review = document.querySelector('div.jftiEf');
+                const all = document.querySelectorAll('div.jftiEf');
+                const review = all.length ? all[all.length - 1] : null;
                 if (review) {
+                    review.scrollIntoView({behavior: 'instant', block: 'end'});
                     let el = review.parentElement;
                     while (el && el !== document.body) {
                         if (el.scrollHeight > el.clientHeight + 10) {
