@@ -19,7 +19,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 # ── SET THE URL HERE ───────────────────────────────────────────────────────────
 
-PLACE_URL = "https://www.google.com/maps/place/Parco+Panoramico+Paradiso/@45.9883526,8.9465803,17z/data=!3m1!4b1!4m6!3m5!1s0x47842dbf29983c33:0x79c478a81ccd8c43!8m2!3d45.9883526!4d8.9491552!16s%2Fg%2F11dfj50d6_?entry=ttu&g_ep=EgoyMDI2MDQxNS4wIKXMDSoASAFQAw%3D%3D"
+PLACE_URL = "https://www.google.com/maps/place/Rivetta+Tell/@46.0036158,8.9525083,17z/data=!3m1!4b1!4m6!3m5!1s0x47842d8d058c3989:0x3bf02a7472e8d541!8m2!3d46.0036158!4d8.9550832!16s%2Fg%2F12ltm6y57?entry=ttu&g_ep=EgoyMDI2MDQyMi4wIKXMDSoASAFQAw%3D%3D"
 
 TARGET_REVIEWS = 10_000
 OUTPUT_DIR = Path("lugano_output")
@@ -126,9 +126,48 @@ def expand_reviews(page):
     except Exception:
         pass
 
+FIND_PANEL_JS = """
+    (() => {
+        // Walk every div that scrolls; pick the one containing jftiEf reviews
+        const reviews = document.querySelectorAll('div.jftiEf');
+        if (!reviews.length) return null;
+        let el = reviews[0].parentElement;
+        while (el && el !== document.body) {
+            if (el.scrollHeight > el.clientHeight + 50) return el;
+            el = el.parentElement;
+        }
+        return null;
+    })()
+"""
+
+def find_scroll_panel(page):
+    """Return a Playwright ElementHandle for the reviews scrollable panel, or None."""
+    try:
+        return page.evaluate_handle(FIND_PANEL_JS)
+    except Exception:
+        return None
+
+
+def scroll_panel(page, panel_handle):
+    """Scroll the given panel handle to its bottom."""
+    try:
+        page.evaluate("el => { el.scrollTop = el.scrollHeight; }", panel_handle)
+    except Exception:
+        pass
+    # Fallback: keyboard End on whatever is focused
+    try:
+        page.keyboard.press("End")
+    except Exception:
+        pass
+
+
 def scroll_to_target(page, target: int):
     last_count = 0
     stale_rounds = 0
+    MAX_STALE = 25  # ~35-45 s total patience
+
+    # Locate the scrollable panel once up-front; re-probe if lost
+    panel = find_scroll_panel(page)
 
     for _ in range(3000):
         current = page.locator('div.jftiEf').count()
@@ -136,11 +175,19 @@ def scroll_to_target(page, target: int):
         if current >= target:
             print(f"   → Target reached: {current} reviews")
             break
+
         if current == last_count:
             stale_rounds += 1
-            if stale_rounds >= 8:
+            if stale_rounds >= MAX_STALE:
                 print(f"   → No more loading. Stopped at {current}.")
                 break
+            # Every 5 stale rounds: re-find the panel and do a big scroll kick
+            if stale_rounds % 5 == 0:
+                print(f"   → Stale ({stale_rounds}), re-probing panel and kicking scroll…")
+                panel = find_scroll_panel(page)
+                if panel:
+                    scroll_panel(page, panel)
+                human_delay(2.5, 4.0)
         else:
             stale_rounds = 0
             print(f"   → {current} / {target} …")
@@ -148,27 +195,12 @@ def scroll_to_target(page, target: int):
         last_count = current
         expand_reviews(page)
 
-        # Walk up from the LAST review to find its scrollable container, then scroll it
-        try:
-            page.evaluate("""
-                const all = document.querySelectorAll('div.jftiEf');
-                const review = all.length ? all[all.length - 1] : null;
-                if (review) {
-                    review.scrollIntoView({behavior: 'instant', block: 'end'});
-                    let el = review.parentElement;
-                    while (el && el !== document.body) {
-                        if (el.scrollHeight > el.clientHeight + 10) {
-                            el.scrollTop = el.scrollHeight;
-                            break;
-                        }
-                        el = el.parentElement;
-                    }
-                }
-            """)
-        except Exception:
-            page.keyboard.press("End")
+        if panel:
+            scroll_panel(page, panel)
+        else:
+            panel = find_scroll_panel(page)
 
-        human_delay(0.7, 1.3)
+        human_delay(1.2, 2.0)
 
 def parse_reviews(page, place_name: str) -> list[dict]:
     reviews = []
@@ -207,12 +239,22 @@ def parse_reviews(page, place_name: str) -> list[dict]:
             })
     return reviews
 
+def save_reviews(reviews: list[dict], place_name: str, output_dir: Path) -> Path:
+    df = pd.DataFrame(reviews)
+    filename = place_name.lower().replace(" ", "_")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = output_dir / f"{filename}_{timestamp}.csv"
+    df.to_csv(path, index=False, encoding="utf-8-sig")
+    return path
+
+
 def main():
     OUTPUT_DIR.mkdir(exist_ok=True)
     place_name = extract_place_name(PLACE_URL)
     print(f"\n🌿 {place_name}")
     print(f"   Target: {TARGET_REVIEWS} reviews\n")
 
+    reviews = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, args=["--lang=en-US"])
         context = browser.new_context(
@@ -227,22 +269,29 @@ def main():
         )
         page = context.new_page()
 
-        open_url(page, PLACE_URL)
-        click_reviews_tab(page)
-        sort_by_newest(page)
-        scroll_to_target(page, TARGET_REVIEWS)
-        reviews = parse_reviews(page, place_name)
-        browser.close()
+        try:
+            open_url(page, PLACE_URL)
+            click_reviews_tab(page)
+            sort_by_newest(page)
+            scroll_to_target(page, TARGET_REVIEWS)
+            reviews = parse_reviews(page, place_name)
+        except Exception as e:
+            print(f"\n⚠️  Interrupted ({e}), saving whatever was loaded…")
+            try:
+                reviews = parse_reviews(page, place_name)
+            except Exception:
+                pass
+        finally:
+            browser.close()
 
-    df = pd.DataFrame(reviews)
-    filename = place_name.lower().replace(" ", "_")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = OUTPUT_DIR / f"{filename}_{timestamp}.csv"
-    df.to_csv(path, index=False, encoding="utf-8-sig")
-
-    print(f"\n✅ {len(reviews)} reviews → {path}")
-    if not df.empty:
-        print(f"   Avg rating: {df['review_rating'].mean():.2f}")
+    if reviews:
+        path = save_reviews(reviews, place_name, OUTPUT_DIR)
+        df = pd.DataFrame(reviews)
+        print(f"\n✅ {len(reviews)} reviews → {path}")
+        if not df.empty and df['review_rating'].notna().any():
+            print(f"   Avg rating: {df['review_rating'].mean():.2f}")
+    else:
+        print("\n⚠️  No reviews collected.")
 
 if __name__ == "__main__":
     main()
