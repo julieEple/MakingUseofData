@@ -19,7 +19,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 # ── SET THE URL HERE ───────────────────────────────────────────────────────────
 
-PLACE_URL = "https://www.google.com/maps/place/Parco+Tassino/@46.0010446,8.9428326,17z/data=!3m1!4b1!4m6!3m5!1s0x47842d39ce2ab675:0x53487855d2037c35!8m2!3d46.0010446!4d8.9454075!16s%2Fg%2F11f6g21hjz?entry=ttu&g_ep=EgoyMDI2MDQxNS4wIKXMDSoASAFQAw%3D%3D"
+PLACE_URL = "https://www.google.com/maps/place/Parco+Panoramico+Paradiso/@45.9883526,8.9465803,17z/data=!3m1!4b1!4m6!3m5!1s0x47842dbf29983c33:0x79c478a81ccd8c43!8m2!3d45.9883526!4d8.9491552!16s%2Fg%2F11dfj50d6_?entry=ttu&g_ep=EgoyMDI2MDQxNS4wIKXMDSoASAFQAw%3D%3D"
 
 TARGET_REVIEWS = 10_000
 OUTPUT_DIR = Path("lugano_output")
