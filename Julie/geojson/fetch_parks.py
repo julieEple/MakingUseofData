@@ -18,7 +18,6 @@ PARKS = [
     "Parco Paradiso",
     "Rivetta Tell",
     "SkatePark Lugano",
-    "Parco Lambertenghi",
     "Dog Park Tassino",
 ]
 
@@ -146,12 +145,22 @@ def build_html(geojson: dict) -> str:
 
     L.geoJSON(parks, {{
       style: function(feature) {{
+        if (feature.geometry.type === 'Point') return {{}};
         return {{
           color: feature.properties.color,
           fillColor: feature.properties.color,
           fillOpacity: 0.35,
           weight: 2,
         }};
+      }},
+      pointToLayer: function(feature, latlng) {{
+        return L.circleMarker(latlng, {{
+          radius: 18,
+          color: feature.properties.color,
+          fillColor: feature.properties.color,
+          fillOpacity: 0.35,
+          weight: 2,
+        }});
       }},
       onEachFeature: function(feature, layer) {{
         const name = feature.properties.name;

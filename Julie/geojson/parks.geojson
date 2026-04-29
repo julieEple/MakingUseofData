@@ -898,6 +898,21 @@
           ]
         ]
       }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Parco Lambertenghi",
+        "color": "#40916C",
+        "point": true
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          8.957450608148564,
+          46.00924437831436
+        ]
+      }
     }
   ]
 }
